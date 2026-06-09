@@ -3,15 +3,15 @@
 bool GPIO::inuse[5][16] = {};
 Callback GPIO::interrupt_callbacks[16] = {};
 
-GPIO::GPIO(uint32_t portBase, uint8_t pin,
+GPIO::GPIO(GPIO_TypeDef *port, uint8_t pin,
            Mode mode, OutputType otype, Speed speed,
            Pull pull, AlternateFunction af)
-    : _portBase(portBase), _pin(pin), _inuseIdx(-1)
+    : _port(port), _pin(pin), _inuseIdx(-1)
 {
-    _inuseIdx = portToIdx(portBase);
+    _inuseIdx = portToIdx(port);
     if (_inuseIdx == -1 || inuse[_inuseIdx][_pin]) return;
 
-    enableClock(portBase);
+    enableClock(port);
     setMode(mode);
     setOutputType(otype);
     setSpeed(speed);
@@ -22,7 +22,7 @@ GPIO::GPIO(uint32_t portBase, uint8_t pin,
 }
 
 GPIO::GPIO(GPIO&& other) noexcept
-    : _portBase(other._portBase), _pin(other._pin), _inuseIdx(other._inuseIdx)
+    : _port(other._port), _pin(other._pin), _inuseIdx(other._inuseIdx)
 {
     other._inuseIdx = -1;
 }
@@ -30,7 +30,7 @@ GPIO::GPIO(GPIO&& other) noexcept
 GPIO& GPIO::operator=(GPIO&& other) noexcept {
     if (this != &other) {
         this->~GPIO();
-        _portBase  = other._portBase;
+        _port  = other._port;
         _pin       = other._pin;
         _inuseIdx  = other._inuseIdx;
         other._inuseIdx = -1;
@@ -73,58 +73,55 @@ GPIO::~GPIO() {
 }
 void GPIO::setMode(Mode mode) {
     if (mode == Mode::None) return;
-    port()->MODER &= ~(0b11u << _pin * 2);
-    port()->MODER |=  (static_cast<uint32_t>(mode) << _pin * 2);
+    _port->MODER &= ~(0b11u << _pin * 2);
+    _port->MODER |=  (static_cast<uint32_t>(mode) << _pin * 2);
 }
 
 void GPIO::setOutputType(OutputType otype) {
     if (otype == OutputType::None) return;
-    port()->OTYPER &= ~(1u << _pin);
-    port()->OTYPER |=  (static_cast<uint32_t>(otype) << _pin);
+    _port->OTYPER &= ~(1u << _pin);
+    _port->OTYPER |=  (static_cast<uint32_t>(otype) << _pin);
 }
 
 void GPIO::setSpeed(Speed speed) {
     if (speed == Speed::None) return;
-    port()->OSPEEDR &= ~(0b11u << _pin * 2);
-    port()->OSPEEDR |=  (static_cast<uint32_t>(speed) << _pin * 2);
+    _port->OSPEEDR &= ~(0b11u << _pin * 2);
+    _port->OSPEEDR |=  (static_cast<uint32_t>(speed) << _pin * 2);
 }
 
 void GPIO::setPull(Pull pull) {
     if (pull == Pull::None) return;
-    port()->PUPDR &= ~(0b11u << _pin * 2);
-    port()->PUPDR |=  (static_cast<uint32_t>(pull) << _pin * 2);
+    _port->PUPDR &= ~(0b11u << _pin * 2);
+    _port->PUPDR |=  (static_cast<uint32_t>(pull) << _pin * 2);
 }
 
 void GPIO::setAlternateFunction(AlternateFunction af) {
     if (af == AlternateFunction::None) return;
     if (_pin <= 7) {
-        port()->AFR[0] &= ~(0b1111u << _pin * 4);
-        port()->AFR[0] |=  (static_cast<uint32_t>(af) << _pin * 4);
+        _port->AFR[0] &= ~(0b1111u << _pin * 4);
+        _port->AFR[0] |=  (static_cast<uint32_t>(af) << _pin * 4);
     } else {
-        port()->AFR[1] &= ~(0b1111u << (_pin - 8) * 4);
-        port()->AFR[1] |=  (static_cast<uint32_t>(af) << (_pin - 8) * 4);
+        _port->AFR[1] &= ~(0b1111u << (_pin - 8) * 4);
+        _port->AFR[1] |=  (static_cast<uint32_t>(af) << (_pin - 8) * 4);
     }
 }
 
 void GPIO::set() {
-    port()->BSRR = (1u << _pin);
+    _port->BSRR = (1u << _pin);
 }
 
 void GPIO::reset() {
-    port()->BSRR = (1u << (_pin + 16));
+    _port->BSRR = (1u << (_pin + 16));
 }
 
 void GPIO::toggle() {
-    port()->ODR ^= (1u << _pin);
+    _port->ODR ^= (1u << _pin);
 }
 
 bool GPIO::get() {
-    return (port()->IDR & (1u << _pin)) != 0;
+    return (_port->IDR & (1u << _pin)) != 0;
 }
 
-GPIO_TypeDef* GPIO::port() const {
-    return reinterpret_cast<GPIO_TypeDef*>(_portBase);
-}
 
 bool GPIO::setInterruptCallback(Edge edge, void (*fn)(void*), void* param){
     if(interrupt_callbacks[_pin].fn != nullptr){
@@ -137,14 +134,13 @@ bool GPIO::setInterruptCallback(Edge edge, void (*fn)(void*), void* param){
 
     // SYSCFG setup
     uint32_t exticr_val;
-    switch (_portBase) {
-        case GPIOA_BASE: exticr_val = 0; break;
-        case GPIOB_BASE: exticr_val = 1; break;
-        case GPIOC_BASE: exticr_val = 2; break;
-        case GPIOD_BASE: exticr_val = 3; break;
-        case GPIOE_BASE: exticr_val = 4; break;
-        default: return false;
-    }
+    if      (_port == GPIOA) exticr_val = 0;
+    else if (_port == GPIOB) exticr_val = 1;
+    else if (_port == GPIOC) exticr_val = 2;
+    else if (_port == GPIOD) exticr_val = 3;
+    else if (_port == GPIOE) exticr_val = 4;
+    else return false;
+
     uint32_t exticr_idx = _pin / 4;
     uint32_t shift      = (_pin % 4) * 4;
     SYSCFG->EXTICR[exticr_idx] &= ~(0xFu << shift);
@@ -192,25 +188,21 @@ bool GPIO::setInterruptCallback(Edge edge, void (*fn)(void*), void* param){
     return true;
 }
 
-int8_t GPIO::portToIdx(uint32_t portBase) {
-    switch (portBase) {
-        case GPIOA_BASE: return 0;
-        case GPIOB_BASE: return 1;
-        case GPIOC_BASE: return 2;
-        case GPIOD_BASE: return 3;
-        case GPIOE_BASE: return 4;
-        default:         return -1;
-    }
+int8_t GPIO::portToIdx(GPIO_TypeDef *port) {
+    if      (port == GPIOA) return 0;
+    else if (port == GPIOB) return 1;
+    else if (port == GPIOC) return 2;
+    else if (port == GPIOD) return 3;
+    else if (port == GPIOE) return 4;
+    else                    return -1;
 }
 
-void GPIO::enableClock(uint32_t portBase) {
-    switch (portBase) {
-        case GPIOA_BASE: RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN; break;
-        case GPIOB_BASE: RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN; break;
-        case GPIOC_BASE: RCC->AHB1ENR |= RCC_AHB1ENR_GPIOCEN; break;
-        case GPIOD_BASE: RCC->AHB1ENR |= RCC_AHB1ENR_GPIODEN; break;
-        case GPIOE_BASE: RCC->AHB1ENR |= RCC_AHB1ENR_GPIOEEN; break;
-    }
+void GPIO::enableClock(GPIO_TypeDef *port) {
+    if      (port == GPIOA) RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+    else if (port == GPIOB) RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
+    else if (port == GPIOC) RCC->AHB1ENR |= RCC_AHB1ENR_GPIOCEN;
+    else if (port == GPIOD) RCC->AHB1ENR |= RCC_AHB1ENR_GPIODEN;
+    else if (port == GPIOE) RCC->AHB1ENR |= RCC_AHB1ENR_GPIOEEN;
 }
 
 extern "C" void EXTI_Handler(void){

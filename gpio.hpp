@@ -46,7 +46,7 @@ public:
         FallRise
     };
 
-    GPIO(uint32_t portBase, uint8_t pin,
+    GPIO(GPIO_TypeDef *port, uint8_t pin,
          Mode mode = Mode::Input, OutputType otype = OutputType::PushPull, 
          Speed speed = Speed::Low, Pull pull = Pull::NoPUD, 
          AlternateFunction af = AlternateFunction::None);
@@ -71,14 +71,12 @@ public:
     friend void EXTI_Handler(void);
 
 private:
-    uint32_t  _portBase;
-    uint8_t   _pin;
-    int8_t    _inuseIdx;
+    GPIO_TypeDef   *_port;
+    uint8_t         _pin;
+    int8_t          _inuseIdx;
 
-    GPIO_TypeDef* port() const;
-
-    static int8_t  portToIdx(uint32_t portBase);
-    static void    enableClock(uint32_t portBase);
+    static int8_t  portToIdx(GPIO_TypeDef *port);
+    static void    enableClock(GPIO_TypeDef *port);
     static bool    inuse[5][16];
     static Callback interrupt_callbacks[16];
 };
