@@ -176,6 +176,7 @@ public:
         else if (uart == USART6) return 2;
         else                     return -1;
     }
+
     bool send(uint8_t *data, uint16_t len, uint32_t timeout_ms) {
         if (_inuseIdx == -1) return false;
 
@@ -195,6 +196,18 @@ public:
         return true;
     }
 
+    void setStdout(){
+        if(stdout_uart == nullptr){
+            stdout_uart = this;
+        }
+    }
+
+    static void write_syscall(int fd, char *ptr, int len){
+        if(stdout_uart == nullptr)return;
+        (void)fd;
+        stdout_uart->send((uint8_t*)ptr, len, 100);
+    }
+
 private:
     USART_TypeDef *_uart;
     int8_t _inuseIdx;
@@ -203,6 +216,7 @@ private:
     GPIO _cts;
     GPIO _rts;
     static bool    inuse[6];
+    static UART    *stdout_uart;
 
     static bool enableClock(USART_TypeDef *uart, int8_t &idx) {
         idx = uartToIdx(uart);
@@ -218,8 +232,6 @@ private:
     }
 
 };
-
-bool UART::inuse[6] = {};
 
 
 #endif //__UART_HAL__
